@@ -7,7 +7,7 @@ import argparse
 import json
 import threading
 import time
-from datetime import datetime
+from datetime import date, datetime, time as dt_time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from io import StringIO
@@ -21,6 +21,11 @@ BOARD_CODE_CACHE: dict[str, dict[str, Any]] = {
     "行业资金流": {"ts": 0.0, "data": None},
     "概念资金流": {"ts": 0.0, "data": None},
 }
+TREND_BUCKET_MINUTES = 5
+MAX_TREND_POINTS = 144
+TREND_SERIES_PER_SIDE = 5
+MARKET_OPEN_TIME = "09:30"
+MARKET_CLOSE_TIME = "15:00"
 
 HTML_PAGE = """<!DOCTYPE html>
 <html lang="zh-CN">
@@ -162,6 +167,32 @@ HTML_PAGE = """<!DOCTYPE html>
       cursor: wait;
     }
 
+    .refresh-select {
+      border: 1px solid rgba(154, 166, 193, 0.25);
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 8px 34px 8px 12px;
+      font-size: 14px;
+      cursor: pointer;
+      appearance: none;
+      -webkit-appearance: none;
+      -moz-appearance: none;
+      background-image:
+        linear-gradient(45deg, transparent 50%, #9aa6c1 50%),
+        linear-gradient(135deg, #9aa6c1 50%, transparent 50%);
+      background-position:
+        calc(100% - 18px) calc(50% - 3px),
+        calc(100% - 12px) calc(50% - 3px);
+      background-size: 6px 6px, 6px 6px;
+      background-repeat: no-repeat;
+    }
+
+    .refresh-select:disabled {
+      opacity: 0.65;
+      cursor: wait;
+    }
+
     .indicator-note {
       color: #ffe3a8;
       font-size: 13px;
@@ -223,6 +254,7 @@ HTML_PAGE = """<!DOCTYPE html>
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 20px;
+      align-items: start;
     }
 
     .panel {
@@ -238,6 +270,16 @@ HTML_PAGE = """<!DOCTYPE html>
       display: flex;
       flex-direction: column;
       gap: 12px;
+    }
+
+    .panel-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .subpanel h2 {
+      margin-bottom: 16px;
     }
 
     .item {
@@ -294,10 +336,101 @@ HTML_PAGE = """<!DOCTYPE html>
       text-align: center;
     }
 
+    .chart-panel {
+      min-height: 100%;
+    }
+
+    .chart-panel-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .chart-headline {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+
+    .chart-summary {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .chart-note {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 14px;
+    }
+
+    .chart-wrap {
+      position: relative;
+      width: 100%;
+      height: 420px;
+      border: 1px solid rgba(154, 166, 193, 0.16);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.02);
+      overflow: hidden;
+    }
+
+    .chart-canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .chart-empty {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      padding: 24px;
+      text-align: center;
+      background: rgba(18, 25, 50, 0.55);
+    }
+
+    .speed-panel h2 {
+      margin-bottom: 8px;
+    }
+
+    .speed-note {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 14px;
+    }
+
+    .speed-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .speed-value {
+      color: #ef5350;
+      font-size: 18px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .speed-meta {
+      color: var(--muted);
+      font-size: 13px;
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
     @media (max-width: 900px) {
       .grid { grid-template-columns: 1fr; }
       .meta { grid-template-columns: 1fr; }
       h1 { font-size: 24px; }
+      .chart-wrap { height: 340px; }
     }
   </style>
 </head>
@@ -310,7 +443,7 @@ HTML_PAGE = """<!DOCTYPE html>
       </div>
       <div class="subline">
         <span id="scope">加载中...</span>
-        <span>刷新频率：30 秒</span>
+        <span id="refreshLabel">刷新频率：30秒</span>
         <span id="updatedAt">最近更新：-</span>
         <span class="status"><span id="statusDot" class="dot"></span><span id="statusText">初始化中</span></span>
       </div>
@@ -323,6 +456,15 @@ HTML_PAGE = """<!DOCTYPE html>
             <button class="period-btn" type="button" data-period="5">5日</button>
             <button class="period-btn" type="button" data-period="7">7日</button>
           </div>
+          <div class="period-group">
+            <span class="period-label">刷新频率</span>
+            <select id="refreshIntervalSelect" class="refresh-select">
+              <option value="30000">30秒</option>
+              <option value="60000">1分钟</option>
+              <option value="120000">2分钟</option>
+              <option value="300000">5分钟</option>
+            </select>
+          </div>
           <span id="indicatorNote" class="indicator-note"></span>
         </div>
         <button id="refreshBtn" class="refresh-btn" type="button">立即刷新</button>
@@ -332,23 +474,60 @@ HTML_PAGE = """<!DOCTYPE html>
 
     <section class="grid">
       <div class="panel">
-        <h2 id="inflowTitle">主力资金净流入</h2>
-        <div id="inflowList" class="list"><div class="empty">加载中...</div></div>
+        <div class="panel-stack">
+          <section class="subpanel">
+            <h2 id="inflowTitle">主力资金净流入</h2>
+            <div id="inflowList" class="list"><div class="empty">加载中...</div></div>
+          </section>
+          <section class="subpanel">
+            <h2 id="outflowTitle">主力资金净流出</h2>
+            <div id="outflowList" class="list"><div class="empty">加载中...</div></div>
+          </section>
+        </div>
       </div>
-      <div class="panel">
-        <h2 id="outflowTitle">主力资金净流出</h2>
-        <div id="outflowList" class="list"><div class="empty">加载中...</div></div>
+      <div class="panel chart-panel">
+        <div class="chart-panel-stack">
+          <section class="subpanel">
+            <div class="chart-headline">
+              <h2>板块资金流向</h2>
+              <div id="trendSummary" class="chart-summary">加载中...</div>
+            </div>
+            <div class="chart-note">按 5 分钟间隔记录板块净额快照，左侧为金额，右侧为板块名称；每个板块一条净额折线。</div>
+            <div class="chart-wrap">
+              <canvas id="trendCanvas" class="chart-canvas"></canvas>
+              <div id="trendEmpty" class="chart-empty">加载中...</div>
+            </div>
+          </section>
+          <section class="subpanel speed-panel">
+            <div class="chart-headline">
+              <h2>资金流入速度 Top5</h2>
+              <div id="speedSummary" class="chart-summary">加载中...</div>
+            </div>
+            <div class="speed-note">按最近两个有效 5 分钟采样点计算净额增速，展示资金流入速度最快的板块。</div>
+            <div id="speedList" class="speed-list"><div class="empty">加载中...</div></div>
+          </section>
+        </div>
       </div>
     </section>
   </div>
 
   <script>
-    const REFRESH_MS = 30000;
     const DEFAULT_INDICATOR = "today";
     const PERIOD_STORAGE_KEY = "sector-fund-flow-period";
+    const REFRESH_INTERVAL_STORAGE_KEY = "sector-fund-flow-refresh-ms";
+    const REFRESH_OPTIONS = {
+      30000: "30秒",
+      60000: "1分钟",
+      120000: "2分钟",
+      300000: "5分钟"
+    };
+    const DEFAULT_REFRESH_MS = 30000;
     let currentIndicator = DEFAULT_INDICATOR;
+    let currentRefreshMs = DEFAULT_REFRESH_MS;
     let refreshing = false;
     let activeController = null;
+    let latestTrend = null;
+    let refreshTimer = null;
 
     function formatYi(value) {
       const abs = Math.abs(value);
@@ -394,6 +573,10 @@ HTML_PAGE = """<!DOCTYPE html>
       return ["today", "3", "5", "7"].includes(code);
     }
 
+    function isValidRefreshMs(value) {
+      return Object.prototype.hasOwnProperty.call(REFRESH_OPTIONS, String(value));
+    }
+
     function syncPeriodState(period) {
       if (!isValidPeriod(period)) {
         return;
@@ -416,6 +599,40 @@ HTML_PAGE = """<!DOCTYPE html>
         return fromStorage;
       }
       return DEFAULT_INDICATOR;
+    }
+
+    function getInitialRefreshMs() {
+      const url = new URL(window.location.href);
+      const fromUrl = url.searchParams.get("refreshMs");
+      if (isValidRefreshMs(fromUrl)) {
+        return Number(fromUrl);
+      }
+      const fromStorage = window.localStorage.getItem(REFRESH_INTERVAL_STORAGE_KEY);
+      if (isValidRefreshMs(fromStorage)) {
+        return Number(fromStorage);
+      }
+      return DEFAULT_REFRESH_MS;
+    }
+
+    function syncRefreshState(refreshMs) {
+      if (!isValidRefreshMs(refreshMs)) {
+        return;
+      }
+      currentRefreshMs = Number(refreshMs);
+      const label = REFRESH_OPTIONS[String(currentRefreshMs)];
+      const url = new URL(window.location.href);
+      url.searchParams.set("refreshMs", String(currentRefreshMs));
+      window.history.replaceState({}, "", url);
+      window.localStorage.setItem(REFRESH_INTERVAL_STORAGE_KEY, String(currentRefreshMs));
+      document.getElementById("refreshLabel").textContent = `刷新频率：${label}`;
+      document.getElementById("refreshIntervalSelect").value = String(currentRefreshMs);
+    }
+
+    function resetRefreshTimer() {
+      if (refreshTimer) {
+        window.clearInterval(refreshTimer);
+      }
+      refreshTimer = window.setInterval(refresh, currentRefreshMs);
     }
 
     function setActivePeriodButton(period) {
@@ -457,6 +674,214 @@ HTML_PAGE = """<!DOCTYPE html>
       }).join("");
     }
 
+    function renderTrendChart(trend) {
+      latestTrend = trend;
+      const canvas = document.getElementById("trendCanvas");
+      const emptyBox = document.getElementById("trendEmpty");
+      const summary = document.getElementById("trendSummary");
+      const times = trend?.times || [];
+      const seriesList = trend?.series || [];
+
+      if (!times.length || !seriesList.length) {
+        const context = canvas.getContext("2d");
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        emptyBox.style.display = "flex";
+        emptyBox.textContent = "暂无可用的板块资金流向数据";
+        summary.textContent = "等待首个 5 分钟周期采样";
+        return;
+      }
+
+      emptyBox.style.display = "none";
+      summary.textContent = `最近一档 ${times[times.length - 1]}，展示 ${seriesList.length} 个板块净额轨迹`;
+
+      const rect = canvas.getBoundingClientRect();
+      const width = Math.max(rect.width, 320);
+      const height = Math.max(rect.height, 280);
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.round(width * dpr);
+      canvas.height = Math.round(height * dpr);
+
+      const context = canvas.getContext("2d");
+      context.setTransform(dpr, 0, 0, dpr, 0, 0);
+      context.clearRect(0, 0, width, height);
+
+      const padding = { top: 20, right: 118, bottom: 36, left: 64 };
+      const plotWidth = width - padding.left - padding.right;
+      const plotHeight = height - padding.top - padding.bottom;
+      const values = seriesList.flatMap((item) => item.values.filter((value) => typeof value === "number"));
+      let maxAbs = Math.max(...values.map((value) => Math.abs(value)), 1);
+      maxAbs = Math.ceil(maxAbs * 1.15 * 10) / 10;
+      const minY = -maxAbs;
+      const maxY = maxAbs;
+      const yTicks = [maxAbs, maxAbs / 2, 0, -maxAbs / 2, -maxAbs];
+      const palette = [
+        "#ef5350",
+        "#42a5f5",
+        "#26c281",
+        "#f7b955",
+        "#ab47bc",
+        "#ff7043",
+        "#7e57c2",
+        "#26a69a",
+        "#ec407a",
+        "#8d6e63",
+      ];
+
+      function xAt(index) {
+        if (times.length === 1) {
+          return padding.left + plotWidth / 2;
+        }
+        return padding.left + (plotWidth * index) / (times.length - 1);
+      }
+
+      function yAt(value) {
+        const ratio = (value - minY) / (maxY - minY || 1);
+        return padding.top + plotHeight - ratio * plotHeight;
+      }
+
+      context.strokeStyle = "rgba(154, 166, 193, 0.18)";
+      context.fillStyle = "#9aa6c1";
+      context.font = '12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+      context.textAlign = "right";
+      context.textBaseline = "middle";
+
+      yTicks.forEach((tick) => {
+        const y = yAt(tick);
+        context.lineWidth = tick === 0 ? 1.5 : 1;
+        context.beginPath();
+        context.moveTo(padding.left, y);
+        context.lineTo(width - padding.right, y);
+        context.stroke();
+        context.fillText(`${tick.toFixed(tick === 0 ? 0 : 1)} 亿`, padding.left - 8, y);
+      });
+
+      context.textAlign = "center";
+      context.textBaseline = "top";
+      const labelStep = Math.max(1, Math.ceil(times.length / 6));
+      times.forEach((time, index) => {
+        if (index % labelStep !== 0 && index !== times.length - 1) {
+          return;
+        }
+        const x = xAt(index);
+        context.fillText(time, x, height - padding.bottom + 10);
+      });
+
+      function drawSeries(series, color) {
+        context.strokeStyle = color;
+        context.fillStyle = color;
+        context.lineWidth = 2;
+        let started = false;
+        let lastValid = null;
+        context.beginPath();
+        series.values.forEach((value, index) => {
+          if (typeof value !== "number") {
+            return;
+          }
+          const x = xAt(index);
+          const y = yAt(value);
+          if (!started) {
+            context.moveTo(x, y);
+            started = true;
+          } else {
+            context.lineTo(x, y);
+          }
+          lastValid = { x, y, index, value };
+        });
+        if (started) {
+          context.stroke();
+        }
+
+        series.values.forEach((value, index) => {
+          if (typeof value !== "number") {
+            return;
+          }
+          const x = xAt(index);
+          const y = yAt(value);
+          context.beginPath();
+          context.arc(x, y, lastValid && index === lastValid.index ? 4 : 2.5, 0, Math.PI * 2);
+          context.fill();
+        });
+
+        return lastValid;
+      }
+
+      const labels = [];
+      seriesList.forEach((series, index) => {
+        const color = palette[index % palette.length];
+        const lastValid = drawSeries(series, color);
+        if (lastValid) {
+          labels.push({
+            name: series.name,
+            color,
+            value: lastValid.value,
+            x: lastValid.x,
+            y: lastValid.y,
+          });
+        }
+      });
+
+      labels.sort((a, b) => a.y - b.y);
+      const minGap = 16;
+      for (let index = 1; index < labels.length; index += 1) {
+        labels[index].y = Math.max(labels[index].y, labels[index - 1].y + minGap);
+      }
+      for (let index = labels.length - 2; index >= 0; index -= 1) {
+        labels[index].y = Math.min(labels[index].y, labels[index + 1].y - minGap);
+      }
+
+      const minLabelY = padding.top + 10;
+      const maxLabelY = height - padding.bottom - 10;
+      labels.forEach((label) => {
+        label.y = Math.min(Math.max(label.y, minLabelY), maxLabelY);
+      });
+
+      context.textAlign = "left";
+      context.textBaseline = "middle";
+      context.font = '12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+      labels.forEach((label) => {
+        const labelX = width - padding.right + 14;
+        context.strokeStyle = label.color;
+        context.fillStyle = label.color;
+        context.lineWidth = 1;
+        context.beginPath();
+        context.moveTo(label.x + 4, label.y);
+        context.lineTo(labelX - 6, label.y);
+        context.stroke();
+        context.fillText(`${label.name} ${label.value > 0 ? "+" : ""}${label.value.toFixed(2)}`, labelX, label.y);
+      });
+    }
+
+    function renderSpeedRanking(items) {
+      const container = document.getElementById("speedList");
+      const summary = document.getElementById("speedSummary");
+      if (!items || !items.length) {
+        container.innerHTML = '<div class="empty">暂无足够的历史采样，无法计算流入速度</div>';
+        summary.textContent = "等待至少两个有效采样点";
+        return;
+      }
+
+      summary.textContent = `最近区间：${items[0].from_time} → ${items[0].to_time}`;
+      const maxSpeed = Math.max(...items.map((item) => item.speed_yi_per_min), 1);
+      container.innerHTML = items.map((item, index) => {
+        const width = Math.max((item.speed_yi_per_min / maxSpeed) * 100, 2);
+        return `
+          <div class="item">
+            <div class="item-top">
+              <div class="rank-name">${index + 1}. ${escapeHtml(item.name)}</div>
+              <div class="speed-value">+${item.speed_yi_per_min.toFixed(2)} 亿/分钟</div>
+            </div>
+            <div class="bar-track">
+              <div class="bar" style="width:${width}%; background:#ef5350"></div>
+            </div>
+            <div class="speed-meta">
+              <div>区间净流入增量：+${item.delta_yi.toFixed(2)} 亿</div>
+              <div>采样区间：${item.from_time} → ${item.to_time}</div>
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+
     async function loadData(signal) {
       const query = new URLSearchParams({ period: currentIndicator });
       const response = await fetch(`/api/data?${query.toString()}`, {
@@ -471,7 +896,9 @@ HTML_PAGE = """<!DOCTYPE html>
 
     function setRefreshingState(isRefreshing) {
       const refreshBtn = document.getElementById("refreshBtn");
+      const refreshSelect = document.getElementById("refreshIntervalSelect");
       refreshBtn.disabled = isRefreshing;
+      refreshSelect.disabled = isRefreshing;
       refreshBtn.textContent = isRefreshing ? "刷新中..." : "立即刷新";
     }
 
@@ -511,6 +938,8 @@ HTML_PAGE = """<!DOCTYPE html>
 
         renderList("inflowList", data.inflow, "#ef5350");
         renderList("outflowList", data.outflow, "#42a5f5");
+        renderTrendChart(data.trend);
+        renderSpeedRanking(data.speed_ranking);
         sourceBadge.textContent = `当前数据源：${providerLabel(data.provider)}`;
         if (data.indicator_note) {
           indicatorNote.style.display = "inline";
@@ -547,6 +976,8 @@ HTML_PAGE = """<!DOCTYPE html>
         sourceBadge.textContent = "当前数据源：获取失败";
         errorBox.style.display = "block";
         errorBox.textContent = `页面刷新失败：${error.message}`;
+        renderTrendChart(latestTrend);
+        renderSpeedRanking([]);
       } finally {
         if (activeController === controller) {
           activeController = null;
@@ -564,11 +995,21 @@ HTML_PAGE = """<!DOCTYPE html>
         refresh(true);
       });
     });
+    document.getElementById("refreshIntervalSelect").addEventListener("change", (event) => {
+      syncRefreshState(event.target.value);
+      resetRefreshTimer();
+    });
     document.getElementById("refreshBtn").addEventListener("click", refresh);
+    window.addEventListener("resize", () => {
+      if (latestTrend) {
+        renderTrendChart(latestTrend);
+      }
+    });
     syncPeriodState(getInitialPeriod());
+    syncRefreshState(getInitialRefreshMs());
     setActivePeriodButton(currentIndicator);
+    resetRefreshTimer();
     refresh();
-    setInterval(refresh, REFRESH_MS);
   </script>
 </body>
 </html>
@@ -589,7 +1030,7 @@ def parse_args() -> argparse.Namespace:
         default="行业资金流",
         choices=["行业资金流", "概念资金流", "地域资金流"],
     )
-    parser.add_argument("--top", type=int, default=10)
+    parser.add_argument("--top", type=int, default=5)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument(
@@ -826,12 +1267,327 @@ def period_code_to_indicator(period_code: str | None) -> str | None:
     return mapping.get(period_code)
 
 
+def period_code_to_indicator_code(indicator: str | None) -> str | None:
+    mapping = {
+        "今日": "today",
+        "3日": "3",
+        "5日": "5",
+        "7日": "7",
+        "10日": "7",
+    }
+    if indicator is None:
+        return None
+    return mapping.get(indicator)
+
+
 def resolve_requested_indicator(requested_indicator: str) -> tuple[str, str | None]:
     if requested_indicator in {"3日", "5日", "10日", "今日"}:
         return requested_indicator, None
     if requested_indicator == "7日":
         return "10日", "7日暂无直连接口，当前按10日数据近似展示"
     raise ValueError(f"不支持的查询周期: {requested_indicator}")
+
+
+def select_trend_boards(df: Any) -> list[str]:
+    inflow_names = (
+        df.sort_values("主力净流入", ascending=False)
+        .head(TREND_SERIES_PER_SIDE)["板块名称"]
+        .astype(str)
+        .tolist()
+    )
+    outflow_names = (
+        df.sort_values("主力净流入", ascending=True)
+        .head(TREND_SERIES_PER_SIDE)["板块名称"]
+        .astype(str)
+        .tolist()
+    )
+    return list(dict.fromkeys(inflow_names + outflow_names))
+
+
+def summarize_board_net_values(df: Any, board_names: list[str]) -> dict[str, float]:
+    board_map = {
+        str(row.板块名称): round(float(row.主力净流入) / 100000000, 2)
+        for row in df.itertuples(index=False)
+    }
+    return {
+        board_name: board_map[board_name]
+        for board_name in board_names
+        if board_name in board_map
+    }
+
+
+def build_market_time_labels() -> list[str]:
+    start_hour, start_minute = [int(part) for part in MARKET_OPEN_TIME.split(":")]
+    end_hour, end_minute = [int(part) for part in MARKET_CLOSE_TIME.split(":")]
+    start_total = start_hour * 60 + start_minute
+    end_total = end_hour * 60 + end_minute
+    return [
+        f"{total_minutes // 60:02d}:{total_minutes % 60:02d}"
+        for total_minutes in range(start_total, end_total + 1, TREND_BUCKET_MINUTES)
+    ]
+
+
+def market_time_value(text: str) -> dt_time:
+    hour, minute = [int(part) for part in text.split(":")]
+    return dt_time(hour=hour, minute=minute)
+
+
+def market_session_bounds(target_date: date) -> tuple[datetime, datetime]:
+    return (
+        datetime.combine(target_date, market_time_value(MARKET_OPEN_TIME)),
+        datetime.combine(target_date, market_time_value(MARKET_CLOSE_TIME)),
+    )
+
+
+def parse_bucket_datetime(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        return datetime.strptime(str(value), "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+
+
+def normalize_session_points(
+    points: list[dict[str, Any]],
+    target_date: date,
+) -> list[dict[str, Any]]:
+    session_start, session_end = market_session_bounds(target_date)
+    normalized_points: list[dict[str, Any]] = []
+    for item in points:
+        bucket_dt = parse_bucket_datetime(item.get("bucket"))
+        if bucket_dt is None:
+            continue
+        if not (session_start <= bucket_dt <= session_end):
+            continue
+        normalized_points.append(
+            {
+                "bucket": bucket_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                "time": bucket_dt.strftime("%H:%M"),
+                "boards": item.get("boards", {}),
+            }
+        )
+    return normalized_points
+
+
+def is_after_market_close(moment: datetime) -> bool:
+    _, session_end = market_session_bounds(moment.date())
+    return moment > session_end
+
+
+def build_close_snapshot_point_from_payload(
+    payload: dict[str, Any],
+    target_date: date,
+) -> dict[str, Any] | None:
+    boards: dict[str, float] = {}
+    for item in list(payload.get("inflow", [])) + list(payload.get("outflow", [])):
+        if not isinstance(item, dict):
+            continue
+        board_name = item.get("name")
+        net_value = item.get("net_inflow_yi")
+        if not board_name or net_value is None:
+            continue
+        try:
+            boards[str(board_name)] = round(float(net_value), 2)
+        except (TypeError, ValueError):
+            continue
+    if not boards:
+        return None
+
+    _, session_end = market_session_bounds(target_date)
+    return {
+        "bucket": session_end.strftime("%Y-%m-%d %H:%M:%S"),
+        "time": session_end.strftime("%H:%M"),
+        "boards": boards,
+    }
+
+
+def build_trend_point(
+    df: Any,
+    captured_at: datetime,
+    board_names: list[str],
+) -> dict[str, Any]:
+    bucket_seconds = TREND_BUCKET_MINUTES * 60
+    bucket_epoch = int(captured_at.timestamp()) // bucket_seconds * bucket_seconds
+    bucket_dt = datetime.fromtimestamp(bucket_epoch)
+    session_start, session_end = market_session_bounds(captured_at.date())
+    if bucket_dt < session_start:
+        bucket_dt = session_start
+    if captured_at > session_end and bucket_dt > session_end:
+        bucket_dt = session_end
+    return {
+        "bucket": bucket_dt.strftime("%Y-%m-%d %H:%M:%S"),
+        "time": bucket_dt.strftime("%H:%M"),
+        "boards": summarize_board_net_values(df, board_names),
+    }
+
+
+def build_trend_series_from_points(
+    points: list[dict[str, Any]],
+    board_names: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    times = build_market_time_labels()
+    latest_boards = points[-1]["boards"] if points else {}
+    if board_names is None:
+        board_names = list(latest_boards.keys())
+        if not board_names:
+            discovered: list[str] = []
+            for point in points:
+                for board_name in point.get("boards", {}):
+                    if board_name not in discovered:
+                        discovered.append(board_name)
+            board_names = discovered
+
+    series = []
+    for board_name in board_names:
+        values_by_time = {
+            str(point["time"]): (
+                None
+                if point["boards"].get(board_name) is None
+                else round(float(point["boards"][board_name]), 2)
+            )
+            for point in points
+        }
+        values = [values_by_time.get(time_label) for time_label in times]
+        if not any(value is not None for value in values):
+            continue
+        latest_value = next((value for value in reversed(values) if value is not None), None)
+        series.append(
+            {
+                "name": board_name,
+                "values": values,
+                "latest_value_yi": latest_value,
+            }
+        )
+
+    return series
+
+
+def compute_speed_ranking(trend: dict[str, Any], limit: int = 5) -> list[dict[str, Any]]:
+    times = trend.get("times", [])
+    series = trend.get("series", [])
+    if not isinstance(times, list) or not isinstance(series, list):
+        return []
+
+    ranking: list[dict[str, Any]] = []
+    for item in series:
+        if not isinstance(item, dict):
+            continue
+        values = item.get("values")
+        if not isinstance(values, list) or len(values) != len(times):
+            continue
+        valid_points = [
+            (index, float(value))
+            for index, value in enumerate(values)
+            if isinstance(value, (int, float))
+        ]
+        if len(valid_points) < 2:
+            continue
+        (prev_index, prev_value), (last_index, last_value) = valid_points[-2], valid_points[-1]
+        interval_minutes = (last_index - prev_index) * TREND_BUCKET_MINUTES
+        if interval_minutes <= 0:
+            continue
+        delta_yi = round(last_value - prev_value, 2)
+        speed_yi_per_min = round(delta_yi / interval_minutes, 4)
+        if speed_yi_per_min <= 0:
+            continue
+        ranking.append(
+            {
+                "name": str(item.get("name", "-")),
+                "delta_yi": delta_yi,
+                "speed_yi_per_min": speed_yi_per_min,
+                "from_time": str(times[prev_index]),
+                "to_time": str(times[last_index]),
+            }
+        )
+
+    ranking.sort(key=lambda row: (row["speed_yi_per_min"], row["delta_yi"]), reverse=True)
+    return ranking[:limit]
+
+
+def build_trend_payload(
+    df: Any,
+    existing_points: list[dict[str, Any]] | None,
+    captured_at: datetime,
+    board_names: list[str],
+) -> dict[str, Any]:
+    points = [
+        item
+        for item in (existing_points or [])
+        if isinstance(item, dict)
+        and "bucket" in item
+        and "time" in item
+        and isinstance(item.get("boards"), dict)
+    ]
+    points = normalize_session_points(points, captured_at.date())
+    point = build_trend_point(df, captured_at, board_names)
+    if points and points[-1]["bucket"] == point["bucket"]:
+        points[-1] = point
+    else:
+        points.append(point)
+    points = points[-MAX_TREND_POINTS:]
+    times = build_market_time_labels()
+    series = build_trend_series_from_points(points, board_names)
+
+    return {
+        "interval_minutes": TREND_BUCKET_MINUTES,
+        "unit": "亿",
+        "times": times,
+        "series": series,
+        "points": points,
+    }
+
+
+def normalize_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(payload)
+    trend = normalized.get("trend")
+    if not isinstance(trend, dict):
+        trend = {}
+    raw_points = trend.get("points")
+    points = []
+    if isinstance(raw_points, list):
+        points = [
+            item
+            for item in raw_points
+            if isinstance(item, dict)
+            and "bucket" in item
+            and "time" in item
+            and isinstance(item.get("boards"), dict)
+        ]
+    today = datetime.now().date()
+    points = normalize_session_points(points, today)
+    if not points and is_after_market_close(datetime.now()):
+        close_point = build_close_snapshot_point_from_payload(normalized, today)
+        if close_point is not None:
+            points = [close_point]
+    expected_times = build_market_time_labels()
+    times = trend.get("times")
+    if not isinstance(times, list) or times != expected_times:
+        times = expected_times
+    series = trend.get("series")
+    if (
+        not isinstance(series, list)
+        or any(not isinstance(item, dict) for item in series)
+        or any(len(item.get("values", [])) != len(times) for item in series if isinstance(item, dict))
+    ):
+        series = build_trend_series_from_points(points)
+    speed_ranking = normalized.get("speed_ranking")
+    if not isinstance(speed_ranking, list):
+        speed_ranking = compute_speed_ranking(
+            {
+                "times": times,
+                "series": series,
+            }
+        )
+    normalized["trend"] = {
+        "interval_minutes": trend.get("interval_minutes", TREND_BUCKET_MINUTES),
+        "unit": trend.get("unit", "亿"),
+        "times": times,
+        "series": series,
+        "points": points,
+    }
+    normalized["speed_ranking"] = speed_ranking
+    return normalized
 
 
 def make_payload(
@@ -842,8 +1598,10 @@ def make_payload(
     sector_type: str,
     top: int,
     provider: str,
+    fetched_at: datetime,
     recent_3day_map: dict[str, float] | None = None,
     board_detail_map: dict[str, dict[str, str]] | None = None,
+    trend: dict[str, Any] | None = None,
     indicator_note: str | None = None,
 ) -> dict[str, Any]:
     inflow_top = df.sort_values("主力净流入", ascending=False).head(top)
@@ -892,9 +1650,18 @@ def make_payload(
         "provider": provider,
         "sector_type": sector_type,
         "top": top,
-        "fetched_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "fetched_at": fetched_at.strftime("%Y-%m-%d %H:%M:%S"),
         "inflow": build_items(inflow_top),
         "outflow": build_items(outflow_top),
+        "trend": trend
+        or {
+            "interval_minutes": TREND_BUCKET_MINUTES,
+            "unit": "亿",
+            "times": [],
+            "series": [],
+            "points": [],
+        },
+        "speed_ranking": compute_speed_ranking(trend or {"times": [], "series": []}),
     }
 
 
@@ -934,6 +1701,35 @@ class FundFlowService:
             encoding="utf-8",
         )
 
+    def _adapt_cached_payload(self, payload: dict[str, Any], requested_indicator: str) -> dict[str, Any]:
+        normalized = normalize_payload(payload)
+        normalized["requested_indicator"] = requested_indicator
+        normalized["requested_indicator_code"] = period_code_to_indicator_code(requested_indicator)
+        normalized["top"] = self.top
+        normalized["inflow"] = normalized.get("inflow", [])[: self.top]
+        normalized["outflow"] = normalized.get("outflow", [])[: self.top]
+        return normalized
+
+    def _find_cached_payload(
+        self,
+        requested_indicator: str,
+        requested_indicator_code: str,
+    ) -> dict[str, Any] | None:
+        exact = self.cache.get(self._cache_key(requested_indicator_code))
+        if isinstance(exact, dict):
+            return self._adapt_cached_payload(exact, requested_indicator)
+
+        for payload in self.cache.values():
+            if not isinstance(payload, dict):
+                continue
+            if payload.get("sector_type") != self.sector_type:
+                continue
+            payload_code = payload.get("requested_indicator_code")
+            payload_indicator = payload.get("requested_indicator")
+            if payload_code == requested_indicator_code or payload_indicator == requested_indicator:
+                return self._adapt_cached_payload(payload, requested_indicator)
+        return None
+
     def get_payload(self, requested_indicator: str | None = None, requested_indicator_code: str | None = None) -> dict[str, Any]:
         with self._lock:
             requested_indicator = requested_indicator or self.indicator
@@ -941,10 +1737,18 @@ class FundFlowService:
             actual_indicator, indicator_note = resolve_requested_indicator(requested_indicator)
             cache_key = self._cache_key(requested_indicator_code)
             try:
+                captured_at = datetime.now()
                 df, actual_provider = fetch_sector_fund_flow(
                     actual_indicator,
                     self.sector_type,
                     provider=self.provider,
+                )
+                trend_board_names = select_trend_boards(df)
+                trend = build_trend_payload(
+                    df,
+                    self.cache.get(cache_key, {}).get("trend", {}).get("points"),
+                    captured_at,
+                    trend_board_names,
                 )
                 board_names = list(
                     dict.fromkeys(
@@ -965,18 +1769,21 @@ class FundFlowService:
                     self.sector_type,
                     self.top,
                     actual_provider,
+                    captured_at,
                     build_recent_3day_map(self.sector_type, actual_provider),
                     board_detail_map,
+                    trend,
                     indicator_note,
                 )
                 payload["source"] = "live"
                 payload["error"] = None
+                payload = normalize_payload(payload)
                 self.cache[cache_key] = payload
                 self._save_cache()
                 return payload
             except Exception as exc:
-                if cache_key in self.cache:
-                    payload = dict(self.cache[cache_key])
+                payload = self._find_cached_payload(requested_indicator, requested_indicator_code)
+                if payload is not None:
                     payload["source"] = "cache"
                     payload["error"] = summarize_fetch_error(exc)
                     return payload
