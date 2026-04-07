@@ -21,7 +21,7 @@ def parse_args() -> argparse.Namespace:
         "--provider",
         default="auto",
         choices=["auto", "eastmoney", "ths"],
-        help="数据源，默认: auto（先东财，失败后回退同花顺）",
+        help="数据源，默认: auto（先同花顺，失败后回退东方财富）",
     )
     parser.add_argument(
         "--indicator",
@@ -188,8 +188,8 @@ def fetch_sector_fund_flow(indicator: str, sector_type: str, provider: str = "au
 
     if provider == "auto":
         loaders = [
-            ("eastmoney", load_sector_fund_flow_eastmoney),
             ("ths", load_sector_fund_flow_ths),
+            ("eastmoney", load_sector_fund_flow_eastmoney),
         ]
     elif provider == "eastmoney":
         loaders = [("eastmoney", load_sector_fund_flow_eastmoney)]

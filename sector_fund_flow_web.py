@@ -582,6 +582,7 @@ def parse_args() -> argparse.Namespace:
         "--provider",
         default="auto",
         choices=["auto", "eastmoney", "ths"],
+        help="数据源，默认: auto（先同花顺，失败后回退东方财富）",
     )
     parser.add_argument(
         "--sector-type",
