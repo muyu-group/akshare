@@ -55,8 +55,8 @@ HTML_PAGE = """<!DOCTYPE html>
     }
 
     .container {
-      width: min(1280px, 96vw);
-      margin: 24px auto 40px;
+      width: min(1720px, 99vw);
+      margin: 16px auto 32px;
     }
 
     .header, .panel {
@@ -252,7 +252,7 @@ HTML_PAGE = """<!DOCTYPE html>
 
     .grid {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: minmax(420px, 0.88fr) minmax(620px, 1.12fr);
       gap: 20px;
       align-items: start;
     }
@@ -443,6 +443,7 @@ HTML_PAGE = """<!DOCTYPE html>
       </div>
       <div class="subline">
         <span id="scope">加载中...</span>
+        <span id="providerLabel">数据源策略：自动切换</span>
         <span id="refreshLabel">刷新频率：30秒</span>
         <span id="updatedAt">最近更新：-</span>
         <span class="status"><span id="statusDot" class="dot"></span><span id="statusText">初始化中</span></span>
@@ -463,6 +464,14 @@ HTML_PAGE = """<!DOCTYPE html>
               <option value="60000">1分钟</option>
               <option value="120000">2分钟</option>
               <option value="300000">5分钟</option>
+            </select>
+          </div>
+          <div class="period-group">
+            <span class="period-label">数据源</span>
+            <select id="providerSelect" class="refresh-select">
+              <option value="auto">自动切换</option>
+              <option value="ths">同花顺</option>
+              <option value="eastmoney">东方财富</option>
             </select>
           </div>
           <span id="indicatorNote" class="indicator-note"></span>
@@ -515,6 +524,7 @@ HTML_PAGE = """<!DOCTYPE html>
     const DEFAULT_INDICATOR = "today";
     const PERIOD_STORAGE_KEY = "sector-fund-flow-period";
     const REFRESH_INTERVAL_STORAGE_KEY = "sector-fund-flow-refresh-ms";
+    const PROVIDER_STORAGE_KEY = "sector-fund-flow-provider";
     const REFRESH_OPTIONS = {
       30000: "30秒",
       60000: "1分钟",
@@ -522,8 +532,10 @@ HTML_PAGE = """<!DOCTYPE html>
       300000: "5分钟"
     };
     const DEFAULT_REFRESH_MS = 30000;
+    const DEFAULT_PROVIDER = "auto";
     let currentIndicator = DEFAULT_INDICATOR;
     let currentRefreshMs = DEFAULT_REFRESH_MS;
+    let currentProvider = DEFAULT_PROVIDER;
     let refreshing = false;
     let activeController = null;
     let latestTrend = null;
@@ -577,6 +589,10 @@ HTML_PAGE = """<!DOCTYPE html>
       return Object.prototype.hasOwnProperty.call(REFRESH_OPTIONS, String(value));
     }
 
+    function isValidProvider(value) {
+      return ["auto", "ths", "eastmoney"].includes(String(value));
+    }
+
     function syncPeriodState(period) {
       if (!isValidPeriod(period)) {
         return;
@@ -614,6 +630,19 @@ HTML_PAGE = """<!DOCTYPE html>
       return DEFAULT_REFRESH_MS;
     }
 
+    function getInitialProvider() {
+      const url = new URL(window.location.href);
+      const fromUrl = url.searchParams.get("provider");
+      if (isValidProvider(fromUrl)) {
+        return fromUrl;
+      }
+      const fromStorage = window.localStorage.getItem(PROVIDER_STORAGE_KEY);
+      if (isValidProvider(fromStorage)) {
+        return fromStorage;
+      }
+      return DEFAULT_PROVIDER;
+    }
+
     function syncRefreshState(refreshMs) {
       if (!isValidRefreshMs(refreshMs)) {
         return;
@@ -626,6 +655,19 @@ HTML_PAGE = """<!DOCTYPE html>
       window.localStorage.setItem(REFRESH_INTERVAL_STORAGE_KEY, String(currentRefreshMs));
       document.getElementById("refreshLabel").textContent = `刷新频率：${label}`;
       document.getElementById("refreshIntervalSelect").value = String(currentRefreshMs);
+    }
+
+    function syncProviderState(provider) {
+      if (!isValidProvider(provider)) {
+        return;
+      }
+      currentProvider = String(provider);
+      const url = new URL(window.location.href);
+      url.searchParams.set("provider", currentProvider);
+      window.history.replaceState({}, "", url);
+      window.localStorage.setItem(PROVIDER_STORAGE_KEY, currentProvider);
+      document.getElementById("providerSelect").value = currentProvider;
+      document.getElementById("providerLabel").textContent = `数据源策略：${providerLabel(currentProvider)}`;
     }
 
     function resetRefreshTimer() {
@@ -883,7 +925,7 @@ HTML_PAGE = """<!DOCTYPE html>
     }
 
     async function loadData(signal) {
-      const query = new URLSearchParams({ period: currentIndicator });
+      const query = new URLSearchParams({ period: currentIndicator, provider: currentProvider });
       const response = await fetch(`/api/data?${query.toString()}`, {
         cache: "no-store",
         signal,
@@ -897,8 +939,10 @@ HTML_PAGE = """<!DOCTYPE html>
     function setRefreshingState(isRefreshing) {
       const refreshBtn = document.getElementById("refreshBtn");
       const refreshSelect = document.getElementById("refreshIntervalSelect");
+      const providerSelect = document.getElementById("providerSelect");
       refreshBtn.disabled = isRefreshing;
       refreshSelect.disabled = isRefreshing;
+      providerSelect.disabled = isRefreshing;
       refreshBtn.textContent = isRefreshing ? "刷新中..." : "立即刷新";
     }
 
@@ -923,6 +967,9 @@ HTML_PAGE = """<!DOCTYPE html>
       const sourceBadge = document.getElementById("sourceBadge");
       const indicatorNote = document.getElementById("indicatorNote");
 
+      errorBox.style.display = "none";
+      errorBox.textContent = "";
+
       try {
         const data = await loadData(controller.signal);
         syncPeriodState(data.requested_indicator_code);
@@ -931,6 +978,8 @@ HTML_PAGE = """<!DOCTYPE html>
           `范围：${data.requested_indicator} / ${data.sector_type} / Top ${data.top}`;
         document.getElementById("updatedAt").textContent =
           `最近更新：${data.fetched_at}`;
+        document.getElementById("providerLabel").textContent =
+          `数据源策略：${providerLabel(currentProvider)}`;
         document.getElementById("inflowTitle").textContent =
           `主力资金净流入 Top${data.top}`;
         document.getElementById("outflowTitle").textContent =
@@ -999,6 +1048,10 @@ HTML_PAGE = """<!DOCTYPE html>
       syncRefreshState(event.target.value);
       resetRefreshTimer();
     });
+    document.getElementById("providerSelect").addEventListener("change", (event) => {
+      syncProviderState(event.target.value);
+      refresh(true);
+    });
     document.getElementById("refreshBtn").addEventListener("click", refresh);
     window.addEventListener("resize", () => {
       if (latestTrend) {
@@ -1007,6 +1060,7 @@ HTML_PAGE = """<!DOCTYPE html>
     });
     syncPeriodState(getInitialPeriod());
     syncRefreshState(getInitialRefreshMs());
+    syncProviderState(getInitialProvider());
     setActivePeriodButton(currentIndicator);
     resetRefreshTimer();
     refresh();
@@ -1680,8 +1734,9 @@ class FundFlowService:
             "地域资金流": {},
         }
 
-    def _cache_key(self, requested_indicator_code: str) -> str:
-        return f"{self.provider}|{requested_indicator_code}|{self.sector_type}|{self.top}"
+    def _cache_key(self, requested_indicator_code: str, provider: str | None = None) -> str:
+        provider = provider or self.provider
+        return f"{provider}|{requested_indicator_code}|{self.sector_type}|{self.top}"
 
     def _load_cache(self) -> dict[str, Any]:
         if not self.cache_path.exists():
@@ -1691,7 +1746,10 @@ class FundFlowService:
         except (OSError, json.JSONDecodeError):
             return {}
         if isinstance(data, dict) and "inflow" in data and "outflow" in data:
-            key = self._cache_key(data.get("requested_indicator_code", "today"))
+            key = self._cache_key(
+                data.get("requested_indicator_code", "today"),
+                provider=data.get("requested_provider") or data.get("provider") or self.provider,
+            )
             return {key: data}
         return data if isinstance(data, dict) else {}
 
@@ -1701,10 +1759,16 @@ class FundFlowService:
             encoding="utf-8",
         )
 
-    def _adapt_cached_payload(self, payload: dict[str, Any], requested_indicator: str) -> dict[str, Any]:
+    def _adapt_cached_payload(
+        self,
+        payload: dict[str, Any],
+        requested_indicator: str,
+        requested_provider: str,
+    ) -> dict[str, Any]:
         normalized = normalize_payload(payload)
         normalized["requested_indicator"] = requested_indicator
         normalized["requested_indicator_code"] = period_code_to_indicator_code(requested_indicator)
+        normalized["requested_provider"] = requested_provider
         normalized["top"] = self.top
         normalized["inflow"] = normalized.get("inflow", [])[: self.top]
         normalized["outflow"] = normalized.get("outflow", [])[: self.top]
@@ -1714,34 +1778,45 @@ class FundFlowService:
         self,
         requested_indicator: str,
         requested_indicator_code: str,
+        requested_provider: str,
     ) -> dict[str, Any] | None:
-        exact = self.cache.get(self._cache_key(requested_indicator_code))
+        exact = self.cache.get(self._cache_key(requested_indicator_code, provider=requested_provider))
         if isinstance(exact, dict):
-            return self._adapt_cached_payload(exact, requested_indicator)
+            return self._adapt_cached_payload(exact, requested_indicator, requested_provider)
 
         for payload in self.cache.values():
             if not isinstance(payload, dict):
                 continue
             if payload.get("sector_type") != self.sector_type:
                 continue
+            if requested_provider != "auto":
+                payload_provider = payload.get("requested_provider") or payload.get("provider")
+                if payload_provider != requested_provider:
+                    continue
             payload_code = payload.get("requested_indicator_code")
             payload_indicator = payload.get("requested_indicator")
             if payload_code == requested_indicator_code or payload_indicator == requested_indicator:
-                return self._adapt_cached_payload(payload, requested_indicator)
+                return self._adapt_cached_payload(payload, requested_indicator, requested_provider)
         return None
 
-    def get_payload(self, requested_indicator: str | None = None, requested_indicator_code: str | None = None) -> dict[str, Any]:
+    def get_payload(
+        self,
+        requested_indicator: str | None = None,
+        requested_indicator_code: str | None = None,
+        requested_provider: str | None = None,
+    ) -> dict[str, Any]:
         with self._lock:
             requested_indicator = requested_indicator or self.indicator
             requested_indicator_code = requested_indicator_code or "today"
+            requested_provider = requested_provider or self.provider
             actual_indicator, indicator_note = resolve_requested_indicator(requested_indicator)
-            cache_key = self._cache_key(requested_indicator_code)
+            cache_key = self._cache_key(requested_indicator_code, provider=requested_provider)
             try:
                 captured_at = datetime.now()
                 df, actual_provider = fetch_sector_fund_flow(
                     actual_indicator,
                     self.sector_type,
-                    provider=self.provider,
+                    provider=requested_provider,
                 )
                 trend_board_names = select_trend_boards(df)
                 trend = build_trend_payload(
@@ -1777,12 +1852,17 @@ class FundFlowService:
                 )
                 payload["source"] = "live"
                 payload["error"] = None
+                payload["requested_provider"] = requested_provider
                 payload = normalize_payload(payload)
                 self.cache[cache_key] = payload
                 self._save_cache()
                 return payload
             except Exception as exc:
-                payload = self._find_cached_payload(requested_indicator, requested_indicator_code)
+                payload = self._find_cached_payload(
+                    requested_indicator,
+                    requested_indicator_code,
+                    requested_provider,
+                )
                 if payload is not None:
                     payload["source"] = "cache"
                     payload["error"] = summarize_fetch_error(exc)
@@ -1814,10 +1894,12 @@ class RequestHandler(BaseHTTPRequestHandler):
         params = parse_qs(query)
         period_code = params.get("period", [None])[0]
         indicator = period_code_to_indicator(period_code)
+        provider = params.get("provider", [None])[0]
         try:
             payload = self.service.get_payload(
                 requested_indicator=indicator,
                 requested_indicator_code=period_code,
+                requested_provider=provider,
             )
         except Exception as exc:
             self._send_json(

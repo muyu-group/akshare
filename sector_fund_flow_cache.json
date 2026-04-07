@@ -1292,7 +1292,7 @@
     "provider": "ths",
     "sector_type": "行业资金流",
     "top": 5,
-    "fetched_at": "2026-04-07 21:20:50",
+    "fetched_at": "2026-04-07 22:03:10",
     "inflow": [
       {
         "name": "半导体",
@@ -1300,11 +1300,11 @@
         "net_inflow_yi": 40.81,
         "change_pct": "1.32",
         "net_ratio": "-",
-        "recent_3day_net_yi": null,
-        "leader_1": "-",
-        "leader_2": "-",
-        "watch_stock_1": "-",
-        "watch_stock_2": "-"
+        "recent_3day_net_yi": 56.03,
+        "leader_1": "盛科通信(688702)",
+        "leader_2": "康强电子(002119)",
+        "watch_stock_1": "寒武纪(688256)",
+        "watch_stock_2": "德明利(001309)"
       },
       {
         "name": "小金属",
@@ -1312,11 +1312,11 @@
         "net_inflow_yi": 23.62,
         "change_pct": "2.49",
         "net_ratio": "-",
-        "recent_3day_net_yi": null,
-        "leader_1": "-",
-        "leader_2": "-",
-        "watch_stock_1": "-",
-        "watch_stock_2": "-"
+        "recent_3day_net_yi": 5.8,
+        "leader_1": "中稀有色(600259)",
+        "leader_2": "翔鹭钨业(002842)",
+        "watch_stock_1": "云南锗业(002428)",
+        "watch_stock_2": "北方稀土(600111)"
       },
       {
         "name": "化学原料",
@@ -1324,11 +1324,11 @@
         "net_inflow_yi": 21.25,
         "change_pct": "5.39",
         "net_ratio": "-",
-        "recent_3day_net_yi": null,
-        "leader_1": "-",
-        "leader_2": "-",
-        "watch_stock_1": "-",
-        "watch_stock_2": "-"
+        "recent_3day_net_yi": -2.47,
+        "leader_1": "江天化学(300927)",
+        "leader_2": "兴化股份(002109)",
+        "watch_stock_1": "宝丰能源(600989)",
+        "watch_stock_2": "金牛化工(600722)"
       },
       {
         "name": "化学制品",
@@ -1336,11 +1336,11 @@
         "net_inflow_yi": 20.25,
         "change_pct": "3.48",
         "net_ratio": "-",
-        "recent_3day_net_yi": null,
-        "leader_1": "-",
-        "leader_2": "-",
-        "watch_stock_1": "-",
-        "watch_stock_2": "-"
+        "recent_3day_net_yi": 5.85,
+        "leader_1": "凌玮科技(301373)",
+        "leader_2": "东岳硅材(300821)",
+        "watch_stock_1": "卫星化学(002648)",
+        "watch_stock_2": "红宝丽(002165)"
       },
       {
         "name": "农化制品",
@@ -1348,11 +1348,11 @@
         "net_inflow_yi": 19.89,
         "change_pct": "4.53",
         "net_ratio": "-",
-        "recent_3day_net_yi": null,
-        "leader_1": "-",
-        "leader_2": "-",
-        "watch_stock_1": "-",
-        "watch_stock_2": "-"
+        "recent_3day_net_yi": -6.29,
+        "leader_1": "广康生化(300804)",
+        "leader_2": "赤天化(600227)",
+        "watch_stock_1": "华鲁恒升(600426)",
+        "watch_stock_2": "金正大(002470)"
       }
     ],
     "outflow": [
@@ -1362,11 +1362,11 @@
         "net_inflow_yi": -60.04,
         "change_pct": "1.11",
         "net_ratio": "-",
-        "recent_3day_net_yi": null,
-        "leader_1": "-",
-        "leader_2": "-",
-        "watch_stock_1": "-",
-        "watch_stock_2": "-"
+        "recent_3day_net_yi": 100.02,
+        "leader_1": "通鼎互联(002491)",
+        "leader_2": "汇源通信(000586)",
+        "watch_stock_1": "长芯博创(300548)",
+        "watch_stock_2": "通宇通讯(002792)"
       },
       {
         "name": "银行",
@@ -1374,11 +1374,11 @@
         "net_inflow_yi": -21.68,
         "change_pct": "-0.78",
         "net_ratio": "-",
-        "recent_3day_net_yi": null,
-        "leader_1": "-",
-        "leader_2": "-",
-        "watch_stock_1": "-",
-        "watch_stock_2": "-"
+        "recent_3day_net_yi": -11.8,
+        "leader_1": "齐鲁银行(601665)",
+        "leader_2": "宁波银行(002142)",
+        "watch_stock_1": "中信银行(601998)",
+        "watch_stock_2": "苏州银行(002966)"
       },
       {
         "name": "电网设备",
@@ -1386,11 +1386,11 @@
         "net_inflow_yi": -18.29,
         "change_pct": "0.81",
         "net_ratio": "-",
-        "recent_3day_net_yi": null,
-        "leader_1": "-",
-        "leader_2": "-",
-        "watch_stock_1": "-",
-        "watch_stock_2": "-"
+        "recent_3day_net_yi": -8.68,
+        "leader_1": "华盛昌(002980)",
+        "leader_2": "新能泰山(000720)",
+        "watch_stock_1": "中利集团(002309)",
+        "watch_stock_2": "通达股份(002560)"
       },
       {
         "name": "风电设备",
@@ -1398,11 +1398,11 @@
         "net_inflow_yi": -17.21,
         "change_pct": "0.91",
         "net_ratio": "-",
-        "recent_3day_net_yi": null,
-        "leader_1": "-",
-        "leader_2": "-",
-        "watch_stock_1": "-",
-        "watch_stock_2": "-"
+        "recent_3day_net_yi": -8.87,
+        "leader_1": "和展能源(000809)",
+        "leader_2": "宏德股份(301163)",
+        "watch_stock_1": "大金重工(002487)",
+        "watch_stock_2": "恒润股份(603985)"
       },
       {
         "name": "通信服务",
@@ -1410,11 +1410,11 @@
         "net_inflow_yi": -14.46,
         "change_pct": "0.20",
         "net_ratio": "-",
-        "recent_3day_net_yi": null,
-        "leader_1": "-",
-        "leader_2": "-",
-        "watch_stock_1": "-",
-        "watch_stock_2": "-"
+        "recent_3day_net_yi": 10.3,
+        "leader_1": "吴通控股(300292)",
+        "leader_2": "世纪鼎利(300050)",
+        "watch_stock_1": "中国电信(601728)",
+        "watch_stock_2": "三维通信(002115)"
       }
     ],
     "trend": {
