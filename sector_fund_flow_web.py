@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""板块资金流 Web 展示页，每 10 秒自动刷新一次。"""
+"""板块资金流 Web 展示页，每 30 秒自动刷新一次。"""
 
 from __future__ import annotations
 
@@ -310,7 +310,7 @@ HTML_PAGE = """<!DOCTYPE html>
       </div>
       <div class="subline">
         <span id="scope">加载中...</span>
-        <span>刷新频率：10 秒</span>
+        <span>刷新频率：30 秒</span>
         <span id="updatedAt">最近更新：-</span>
         <span class="status"><span id="statusDot" class="dot"></span><span id="statusText">初始化中</span></span>
       </div>
@@ -343,7 +343,7 @@ HTML_PAGE = """<!DOCTYPE html>
   </div>
 
   <script>
-    const REFRESH_MS = 10000;
+    const REFRESH_MS = 30000;
     const DEFAULT_INDICATOR = "today";
     const PERIOD_STORAGE_KEY = "sector-fund-flow-period";
     let currentIndicator = DEFAULT_INDICATOR;
